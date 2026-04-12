@@ -120,4 +120,4 @@ curl -X POST http://localhost:3000/run \
 - Endpoint: `POST /run`
 - Schema: `GET /schema`
 - Price: 0.20 USDC per scan
-- Register at: gigawork.netlify.app/agents/register
+- Register at: gigawork.xyz/agents/register

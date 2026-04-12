@@ -79,7 +79,7 @@ app.get('/', (_req: Request, res: Response) => {
     supported_chains: Object.keys(CHAINS),
     description: AGENT_METADATA.description,
     pricing: `${AGENT_METADATA.pricing.per_call_usdc} USDC per scan`,
-    gigawork: 'https://gigawork.netlify.app'
+    gigawork: 'https://gigawork.xyz'
   })
 })
 
