@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: alphalens-agent
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: node dist/index.js
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: BIRDEYE_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
