@@ -71,7 +71,8 @@ function successResponse(result: Record<string, any>, startedAt: number): AgentS
 }
 
 // ─── Health / discovery ────────────────────────────────────────────
-app.get('/', (_req: Request, res: Response) => {
+// GigaWork platform polls GET /health to verify agent is live.
+const healthHandler = (_req: Request, res: Response) => {
   res.json({
     agent: AGENT_METADATA.name,
     version: AGENT_METADATA.version,
@@ -81,7 +82,9 @@ app.get('/', (_req: Request, res: Response) => {
     pricing: `${AGENT_METADATA.pricing.per_call_usdc} USDC per scan`,
     gigawork: 'https://gigawork.xyz'
   })
-})
+}
+app.get('/', healthHandler)
+app.get('/health', healthHandler)
 
 // ─── Input schema (for GigaWork auto-registration) ─────────────────
 app.get('/schema', (_req: Request, res: Response) => {
