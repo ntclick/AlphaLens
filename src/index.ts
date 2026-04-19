@@ -156,25 +156,27 @@ app.post('/run', async (req: Request, res: Response) => {
         : Promise.resolve(null)
     ])
 
-    // 4. Check critical Birdeye failure — if the token_overview failed with a
-    // retryable error we must propagate it so GigaWork can retry.
+    // 4. Check critical Birdeye failure — HTTP status determines retry behavior
+    // on the GigaWork side: 4xx = break immediately, 5xx = retry with backoff.
+    // Body-level retry_allowed is only consulted for 2xx, so mapping here is
+    // what actually controls retry loops.
     if (tokenOverviewResult.status === 'rejected') {
       const err = tokenOverviewResult.reason
       if (err instanceof BirdeyeError) {
-        // 404 on overview means the contract doesn't exist on this chain
-        if (err.status === 404) {
+        // Birdeye 400/404 on token_overview → contract not indexed on this chain.
+        // Classify as INVALID_INPUT so platform breaks retry and surfaces a
+        // clear "bad input" message to the user.
+        if (err.status === 400 || err.status === 404) {
           return res.status(400).json(
             errorResponse(
               'INVALID_INPUT',
-              `Contract "${contractAddress}" not found on ${chain}. Check address and chain.`,
+              `Contract "${contractAddress}" not indexed by Birdeye on ${chain}. Check address and chain.`,
               false,
               startedAt
             )
           )
         }
-        return res.status(err.retryAllowed ? 503 : 502).json(
-          errorResponse('EXTERNAL_API_FAILED', err.message, err.retryAllowed, startedAt)
-        )
+        return mapBirdeyeError(res, err, startedAt)
       }
       throw err
     }
@@ -330,28 +332,63 @@ app.post('/run', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error(`[AlphaLens] Job ${body.job_id} error:`, err?.message || err)
 
-    // BirdeyeError — already classified
     if (err instanceof BirdeyeError) {
-      return res.status(err.retryAllowed ? 503 : 502).json(
-        errorResponse('EXTERNAL_API_FAILED', err.message, err.retryAllowed, startedAt)
-      )
+      return mapBirdeyeError(res, err, startedAt)
     }
 
-    // DeepSeekError — classified
     if (err instanceof DeepSeekError) {
-      const code: AgentErrorCode = err.isTimeout ? 'TIMEOUT' : 'EXTERNAL_API_FAILED'
-      return res.status(err.retryAllowed ? 503 : 502).json(
-        errorResponse(code, err.message, err.retryAllowed, startedAt)
-      )
+      return mapDeepSeekError(res, err, startedAt)
     }
 
-    // Unknown — treat as retryable internal error
+    // Unknown — treat as retryable internal error (5xx so platform retries once)
     const message = err?.message || 'Unknown internal error'
     return res.status(500).json(
       errorResponse('INTERNAL', message, true, startedAt)
     )
   }
 })
+
+// ─── Error mappers ────────────────────────────────────────────────
+// Critical: HTTP status code drives platform retry behavior.
+// Platform's community-agent client in backend/internal/agents/community.go:
+//   - 4xx responses  → break retry loop (non-retryable)
+//   - 5xx responses  → retry with backoff (retryable)
+//   - 2xx responses  → parse body, respect retry_allowed
+// So non-retryable errors MUST return 4xx or the platform keeps retrying
+// even when our body says retry_allowed:false.
+function mapBirdeyeError(res: Response, err: BirdeyeError, startedAt: number) {
+  if (!err.retryAllowed) {
+    // 400/404 = contract not indexed → user input issue
+    if (err.status === 400 || err.status === 404) {
+      return res.status(400).json(
+        errorResponse('INVALID_INPUT', err.message, false, startedAt)
+      )
+    }
+    // 401/403 = our API key problem → HTTP 400 to stop futile retries,
+    // error_code INTERNAL so user sees "agent misconfigured" not "bad input"
+    return res.status(400).json(
+      errorResponse('INTERNAL', err.message, false, startedAt)
+    )
+  }
+  // Retryable (429, 5xx, network) → 503 so platform retries with backoff
+  return res.status(503).json(
+    errorResponse('EXTERNAL_API_FAILED', err.message, true, startedAt)
+  )
+}
+
+function mapDeepSeekError(res: Response, err: DeepSeekError, startedAt: number) {
+  if (!err.retryAllowed) {
+    // Auth / permanent config error → 400 to break retry loop
+    return res.status(400).json(
+      errorResponse('INTERNAL', err.message, false, startedAt)
+    )
+  }
+  // Timeout vs transient API failure
+  const code: AgentErrorCode = err.isTimeout ? 'TIMEOUT' : 'EXTERNAL_API_FAILED'
+  return res.status(503).json(
+    errorResponse(code, err.message, true, startedAt)
+  )
+}
 
 // ─── Start server ──────────────────────────────────────────────────
 validateEnv()
