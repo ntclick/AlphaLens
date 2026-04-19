@@ -246,10 +246,13 @@ app.post('/run', async (req: Request, res: Response) => {
         deployer_address: creation?.owner || creation?.deployer || null,
         deployer_label: creation?.owner ? KNOWN_LABELS[creation.owner] || null : null,
         contract_type: chain === 'solana' ? 'SPL Token' : 'ERC-20',
-        mint_authority: security?.mintAuthority === null
-          ? 'revoked' : security?.mintAuthority ? 'active' : 'unknown',
-        freeze_authority: security?.freezeAuthority === null
-          ? 'revoked' : security?.freezeAuthority ? 'active' : 'unknown',
+        // mint_authority / freeze_authority are Solana-specific; omit for EVM/Sui
+        ...(chain === 'solana' ? {
+          mint_authority: security?.mintAuthority === null
+            ? 'revoked' : security?.mintAuthority ? 'active' : 'unknown',
+          freeze_authority: security?.freezeAuthority === null
+            ? 'revoked' : security?.freezeAuthority ? 'active' : 'unknown'
+        } : {}),
         explorer_url: `${CHAINS[chain].explorer}/token/${contractAddress}`
       },
 

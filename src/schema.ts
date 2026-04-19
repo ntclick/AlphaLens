@@ -32,7 +32,7 @@ export const INPUT_SCHEMA = {
       type: 'string',
       title: 'Contract Address',
       placeholder: '0x... or So1... token mint',
-      default: '0xa43fe16908251ee70ef74718545e4fe6c5ccec9f'
+      default: '0x6982508145454Ce325dDbE47a25d4ec3d2311933'
     },
     chain: {
       type: 'string',
@@ -57,10 +57,13 @@ export const INPUT_SCHEMA = {
 } as const
 
 export const OUTPUT_EXAMPLE = {
-  contract_address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-  chain: 'solana',
-  token_name: 'USDC',
-  token_symbol: 'USDC',
-  security_assessment: { overall_score: 92, risk_level: 'low' },
-  risk_summary: { investment_grade: 'AAA' }
+  contract_address: '0x6982508145454Ce325dDbE47a25d4ec3d2311933',
+  chain: 'ethereum',
+  token_name: 'Pepe',
+  token_symbol: 'PEPE',
+  market_data: { price_usd: 0.00000378, liquidity_usd: 29830298, volume_24h_usd: 1084142 },
+  holder_analysis: { total_holders: 518099 },
+  security_assessment: { overall_score: 40, risk_level: 'medium' },
+  risk_summary: { investment_grade: 'BB' },
+  recommendation: 'CAUTION due to unavailable security data requiring manual contract review.'
 } as const
