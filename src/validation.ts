@@ -16,6 +16,7 @@ export interface ValidatedInputs {
   chain: string
   depth: 'quick' | 'standard' | 'deep'
   focus: string
+  isUrl: boolean // true if contractAddress is a Dexscreener URL (to be resolved)
 }
 
 const EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/
@@ -52,7 +53,30 @@ function invalidError(message: string): ValidationError {
   return { error_code: 'INVALID_INPUT', error_message: message, retry_allowed: false }
 }
 
+// Validate the per-chain address format. Pulled out so we can re-run it on
+// the resolved address after Dexscreener resolution.
+export function validateAddressFormat(
+  address: string,
+  chain: string
+): ValidationResult | { ok: true } {
+  const cfg = CHAINS[chain]
+  if (!cfg) return invalid(`Unsupported chain: "${chain}"`)
+  const chainType = cfg.type
+  if (chainType === 'evm' && !EVM_ADDRESS.test(address)) {
+    return invalid(`Invalid EVM address format for ${chain}. Expected 0x + 40 hex chars.`)
+  }
+  if (chainType === 'svm' && !SOLANA_ADDRESS.test(address)) {
+    return invalid('Invalid Solana address format. Expected base58 32-44 chars (case-sensitive).')
+  }
+  if (chainType === 'sui' && !SUI_ADDRESS.test(address)) {
+    return invalid('Invalid Sui address format.')
+  }
+  return { ok: true }
+}
+
 // Validate and normalize the inputs for a scan job.
+// URLs skip address-format checks — they are validated after Dexscreener
+// resolves them to a plain token address.
 export function validateInputs(inputs: AgentRequest['inputs']): ValidationResult {
   const rawAddr = typeof inputs?.contract_address === 'string' ? inputs.contract_address.trim() : ''
   const rawChain = typeof inputs?.chain === 'string' ? inputs.chain.trim().toLowerCase() : 'solana'
@@ -67,20 +91,13 @@ export function validateInputs(inputs: AgentRequest['inputs']): ValidationResult
     return invalid(`Unsupported chain: "${rawChain}". Supported: ${Object.keys(CHAINS).join(', ')}`)
   }
 
-  // Format check per chain type
-  const chainType = CHAINS[rawChain].type
-  if (chainType === 'evm') {
-    if (!EVM_ADDRESS.test(rawAddr)) {
-      return invalid(`Invalid EVM address format for ${rawChain}. Expected 0x + 40 hex chars.`)
-    }
-  } else if (chainType === 'svm') {
-    if (!SOLANA_ADDRESS.test(rawAddr)) {
-      return invalid('Invalid Solana address format. Expected base58 32-44 chars.')
-    }
-  } else if (chainType === 'sui') {
-    if (!SUI_ADDRESS.test(rawAddr)) {
-      return invalid('Invalid Sui address format.')
-    }
+  const isUrl = rawAddr.startsWith('http://') || rawAddr.startsWith('https://')
+
+  // Plain addresses are format-checked immediately. URLs defer format checks
+  // until after Dexscreener resolution returns a token address.
+  if (!isUrl) {
+    const fmt = validateAddressFormat(rawAddr, rawChain)
+    if ('ok' in fmt && fmt.ok === false) return fmt as ValidationResult
   }
 
   if (rawDepth !== 'quick' && rawDepth !== 'standard' && rawDepth !== 'deep') {
@@ -93,7 +110,8 @@ export function validateInputs(inputs: AgentRequest['inputs']): ValidationResult
       contractAddress: rawAddr,
       chain: rawChain,
       depth: rawDepth,
-      focus: rawFocus
+      focus: rawFocus,
+      isUrl
     }
   }
 }

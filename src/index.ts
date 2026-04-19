@@ -16,8 +16,9 @@ import {
 } from './sources/security.js'
 import { analyzeWithAI, DeepSeekError } from './analyzer.js'
 import { AgentErrorCode, AgentErrorResponse, AgentSuccessResponse } from './types.js'
-import { validateInputs, validateRequestEnvelope } from './validation.js'
+import { validateAddressFormat, validateInputs, validateRequestEnvelope } from './validation.js'
 import { AGENT_METADATA, INPUT_SCHEMA, OUTPUT_EXAMPLE } from './schema.js'
+import { resolveContractInput, DexscreenerResolveError, ResolvedContract } from './sources/dexscreener.js'
 
 const PORT = Number(process.env.PORT) || 3000
 
@@ -127,8 +128,46 @@ app.post('/run', async (req: Request, res: Response) => {
     )
   }
 
-  const { contractAddress, chain, depth } = inputResult.value
+  // 2b. Resolve Dexscreener URL (if applicable) to a plain token address
+  let resolved: ResolvedContract
+  try {
+    resolved = await resolveContractInput(
+      inputResult.value.contractAddress,
+      inputResult.value.chain
+    )
+  } catch (err: any) {
+    if (err instanceof DexscreenerResolveError) {
+      return res.status(err.retryAllowed ? 503 : 400).json(
+        errorResponse(
+          err.retryAllowed ? 'EXTERNAL_API_FAILED' : 'INVALID_INPUT',
+          err.message,
+          err.retryAllowed,
+          startedAt
+        )
+      )
+    }
+    throw err
+  }
+
+  // URL resolution can override the chain (URL path is authoritative).
+  const contractAddress = resolved.resolved_address
+  const chain = resolved.source === 'url' ? resolved.chain : inputResult.value.chain
+  const { depth } = inputResult.value
+
+  // Re-validate format on the resolved address (Dexscreener could return
+  // anything; trust-but-verify before we hit Birdeye).
+  const fmtCheck = validateAddressFormat(contractAddress, chain)
+  if ('ok' in fmtCheck && fmtCheck.ok === false) {
+    const err = (fmtCheck as any).error as { error_message: string }
+    return res.status(400).json(
+      errorResponse('INVALID_INPUT', `Resolved address invalid: ${err.error_message}`, false, startedAt)
+    )
+  }
+
   const birdeyeChain = CHAINS[chain].birdeyeChain
+  if (resolved.source === 'url') {
+    console.log(`[AlphaLens] Resolved URL → ${contractAddress} (${resolved.pair_info?.base_token.symbol}) on ${chain}`)
+  }
   console.log(`[AlphaLens] Fetching Birdeye data for ${contractAddress} on ${birdeyeChain}`)
 
   try {
@@ -320,7 +359,18 @@ app.post('/run', async (req: Request, res: Response) => {
       ai_analysis: aiResult.ai_analysis,
       recommendation: aiResult.recommendation,
       confidence: aiResult.confidence,
-      disclaimer: 'Not financial advice. Smart contract analysis has inherent limitations. Always DYOR before investing.'
+      disclaimer: 'Not financial advice. Smart contract analysis has inherent limitations. Always DYOR before investing.',
+
+      // Present when Dexscreener resolved a URL or pair → token
+      ...(resolved.source !== 'direct' ? {
+        input_resolution: {
+          source: resolved.source,
+          original_input: resolved.original_input,
+          resolved_address: resolved.resolved_address,
+          pair_info: resolved.pair_info,
+          note: resolved.note
+        }
+      } : {})
     }
 
     const response = successResponse(result, startedAt)
