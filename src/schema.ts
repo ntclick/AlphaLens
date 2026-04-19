@@ -31,22 +31,26 @@ export const INPUT_SCHEMA = {
     contract_address: {
       type: 'string',
       title: 'Contract Address',
-      placeholder: '0x... or So1... token mint'
+      placeholder: '0x... or So1... token mint',
+      default: '0xa43fe16908251ee70ef74718545e4fe6c5ccec9f'
     },
     chain: {
       type: 'string',
       title: 'Chain',
-      enum: Object.keys(CHAINS)
+      enum: Object.keys(CHAINS),
+      default: 'ethereum'
     },
     analysis_depth: {
       type: 'string',
       title: 'Analysis Depth',
-      enum: ['quick', 'standard', 'deep']
+      enum: ['quick', 'standard', 'deep'],
+      default: 'standard'
     },
     focus: {
       type: 'string',
       title: 'Focus (optional)',
-      enum: ['all', 'security', 'smart_money', 'liquidity']
+      enum: ['all', 'security', 'smart_money', 'liquidity'],
+      default: 'all'
     }
   },
   required: ['contract_address', 'chain']
