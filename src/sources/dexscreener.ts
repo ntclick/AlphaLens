@@ -166,13 +166,19 @@ export async function resolveContractInput(
   }
 
   // Plain address — usually pass through untouched.
-  // For case-sensitive chains (Solana, Sui), if the input is all-lowercase
-  // it may have been mangled upstream. Try Dexscreener's case-insensitive
-  // lookup to recover the canonical mixed-case form. If recovery fails we
-  // still pass through (Dexscreener may not know the token).
+  // Two recovery paths before giving up:
+  //   (a) Case recovery: on case-sensitive chains (Solana/Sui) if input is
+  //       all-lowercase it may be mangled. /tokens endpoint is case-insensitive
+  //       and returns canonical mixed case.
+  //   (b) Pair fallback: user pasted a Dexscreener URL SLUG (which is a pair
+  //       address) instead of the token address. /pairs endpoint resolves
+  //       it to the baseToken. This is common because Dexscreener URL path
+  //       uses lowercase pair addresses.
   const chainLower = (userChain || '').toLowerCase()
   const isAllLowercase = trimmed === trimmed.toLowerCase() && /[a-z]/.test(trimmed)
+
   if (CASE_SENSITIVE_CHAINS.has(chainLower) && isAllLowercase) {
+    // (a) Try token lookup first (case-insensitive match)
     const canonical = await lookupCanonicalAddress(trimmed, chainLower)
     if (canonical && canonical !== trimmed) {
       return {
@@ -183,6 +189,35 @@ export async function resolveContractInput(
         note:
           `Input was all-lowercase on case-sensitive chain ${chainLower}. ` +
           `Recovered canonical address via Dexscreener lookup.`
+      }
+    }
+
+    // (b) Try pair lookup — user may have pasted a Dexscreener URL slug
+    // (which is a pair address) instead of the underlying token mint.
+    const pair = await fetchPairInfo(chainLower, trimmed).catch(() => null)
+    if (pair?.baseToken?.address) {
+      return {
+        original_input: trimmed,
+        resolved_address: pair.baseToken.address,
+        chain: chainLower,
+        source: 'pair',
+        pair_info: {
+          pair_address: pair.pairAddress,
+          base_token: {
+            address: pair.baseToken.address,
+            name: pair.baseToken.name,
+            symbol: pair.baseToken.symbol
+          },
+          quote_token: {
+            address: pair.quoteToken.address,
+            name: pair.quoteToken.name,
+            symbol: pair.quoteToken.symbol
+          },
+          dex_id: pair.dexId
+        },
+        note:
+          `Input was a pair/pool address, not a token mint. ` +
+          `Resolved to baseToken via Dexscreener.`
       }
     }
   }
